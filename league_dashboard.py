@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-from PIL import Image
 from pprint import pprint
 
 LEAGUE_ID = 981358650981781504
