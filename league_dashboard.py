@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-from pprint import pprint
+import matplotlib.pyplot as plt
+import matplotlib.cbook as cbook
 
 LEAGUE_ID = 981358650981781504
 API_URL = 'https://api.sleeper.app/v1'
@@ -72,10 +73,26 @@ users = get_users()
 rosters = get_rosters()
 standings = format_standings(users, rosters)
 
-
 st.title('Copper Kings Dynasty League')
+
+tab1, tab2 = st.tabs([':medal: League Standings', ':muscle: Team Strength'])
 
 with st.container():
 
-    st.header(':medal: League Standings')
-    st.dataframe(standings, hide_index = True)
+    tab1.header('League Standings')
+    tab1.dataframe(standings, hide_index = True)
+
+with st.container():
+
+    tab2.header('Team Strength')
+    tab2.text('Tab 2')
+
+    plt.style.use('dark_background')
+
+    fig, ax = plt.subplots()
+
+    ax.scatter(standings['Points For'], standings['Points Against'])
+    ax.axhline(0, color = 'white', linewidth = 1)
+    ax.axvline(0, color = 'white', linewidth = 1)
+
+    st.pyplot(fig)
