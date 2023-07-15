@@ -74,13 +74,16 @@ users = get_users()
 rosters = get_rosters()
 standings = format_standings(users, rosters)
 
-# add_logo('./images/copper_kings_god.jpg')
 
-with st.sidebar:
+st.title('Copper Kings Dynasty League')
 
-    st.text('Copper Kings Dynasty League')
+add_logo('images/copper_kings_god.png', height = 360)
+# add_logo('https://github.com/jpre195/copper-kings-dynasty-dashboard/blob/2-standings/images/copper_kings_god.jpg')
 
-st.dataframe(standings, hide_index = True)
+with st.container():
+
+    st.header(':medal: League Standings')
+    st.dataframe(standings, hide_index = True)
 
 # print(users)
 # print(rosters)
