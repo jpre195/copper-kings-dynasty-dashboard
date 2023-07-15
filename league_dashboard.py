@@ -4,7 +4,6 @@ import numpy as np
 import requests
 from PIL import Image
 from pprint import pprint
-from streamlit_extras.app_logo import add_logo
 
 LEAGUE_ID = 981358650981781504
 API_URL = 'https://api.sleeper.app/v1'
@@ -77,17 +76,7 @@ standings = format_standings(users, rosters)
 
 st.title('Copper Kings Dynasty League')
 
-add_logo('images/copper_kings_god.png', height = 360)
-# add_logo('https://github.com/jpre195/copper-kings-dynasty-dashboard/blob/2-standings/images/copper_kings_god.jpg')
-
 with st.container():
 
     st.header(':medal: League Standings')
     st.dataframe(standings, hide_index = True)
-
-# print(users)
-# print(rosters)
-# print(standings)
-# print(standings.columns)
-# print(rosters.columns)
-# print(rosters.iloc[0, :])
