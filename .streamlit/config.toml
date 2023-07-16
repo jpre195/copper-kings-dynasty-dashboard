@@ -5,10 +5,10 @@
 base = "dark"
 
 # Primary accent color for interactive elements.
-# primaryColor =
+# primaryColor = "#076324"
 
 # Background color for the main content area.
-# backgroundColor =
+# backgroundColor = "#076324"
 
 # Background color used for the sidebar and most interactive widgets.
 # secondaryBackgroundColor =

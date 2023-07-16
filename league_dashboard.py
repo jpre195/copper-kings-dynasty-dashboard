@@ -4,6 +4,7 @@ import numpy as np
 import requests
 import matplotlib.pyplot as plt
 import matplotlib.cbook as cbook
+import altair as alt
 
 LEAGUE_ID = 981358650981781504
 API_URL = 'https://api.sleeper.app/v1'
@@ -69,9 +70,44 @@ def format_standings(users, rosters):
 
     return standings
 
+def get_strength_group(df, avg_for, avg_against):
+
+    points_for = df['Points For']
+    points_against = df['Points Against']
+
+    if points_for > avg_for and points_against > avg_against:
+
+        df['Group'] = 'Juggernaut'
+
+    elif points_for > avg_for and points_against <= avg_against:
+
+        df['Group'] = 'Lucky'
+
+    elif points_for <= avg_for and points_against > avg_against:
+
+        df['Group'] = 'Unlucky'
+
+    else:
+
+        df['Group'] = 'Trash'
+
+    return df
+
+def format_strength(standings):
+
+    strength = standings.copy()
+
+    avg_points_for = strength['Points For'].mean()
+    avg_points_against = strength['Points Against'].mean()
+
+    strength = strength.apply(get_strength_group, axis = 1, avg_for = avg_points_for, avg_against = avg_points_against)
+
+    return strength
+
 users = get_users()
 rosters = get_rosters()
 standings = format_standings(users, rosters)
+strength = format_strength(standings)
 
 st.title('Copper Kings Dynasty League')
 
@@ -79,20 +115,26 @@ tab1, tab2 = st.tabs([':medal: League Standings', ':muscle: Team Strength'])
 
 with st.container():
 
-    tab1.header('League Standings')
-    tab1.dataframe(standings, hide_index = True)
+    tab1.dataframe(standings, hide_index = True, use_container_width = True)
 
 with st.container():
 
-    tab2.header('Team Strength')
-    tab2.text('Tab 2')
+    # plt.style.use('dark_background')
 
-    plt.style.use('dark_background')
+    # fig, ax = plt.subplots()
 
-    fig, ax = plt.subplots()
+    # ax.scatter(standings['Points For'], standings['Points Against'])
+    # ax.axhline(0, color = 'white', linewidth = 1)
+    # ax.axvline(0, color = 'white', linewidth = 1)
 
-    ax.scatter(standings['Points For'], standings['Points Against'])
-    ax.axhline(0, color = 'white', linewidth = 1)
-    ax.axvline(0, color = 'white', linewidth = 1)
+    # tab2.pyplot(fig)
+    
+    domain_ = ['Juggernaut', 'Lucky', 'Unlucky', 'Trash']
+    range_ = ['blue', 'green', 'yellow', 'brown']
 
-    st.pyplot(fig)
+    chart = alt.Chart(strength).mark_circle(size = 250).encode(x = 'Points For',
+                                                      y = 'Points Against',
+                                                      color = alt.Color('Group').scale(domain = domain_, range = range_).title(None),
+                                                      tooltip = ['Points For', 'Points Against', 'Owner', 'Team']).interactive()
+
+    tab2.altair_chart(chart, use_container_width = True)
