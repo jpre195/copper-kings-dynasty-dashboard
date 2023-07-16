@@ -46,6 +46,25 @@ def get_rosters():
 
     return results
 
+@st.cache_data
+def get_matchups():
+
+    week = 1
+
+    while True:
+
+        response = requests.get(f'{API_URL}/league/{LEAGUE_ID}/matchups/{week}')
+
+        results = response.json()
+
+        if len(results) == 0:
+
+            break
+
+        week += 1
+
+    return results
+
 def format_standings(users, rosters):
 
     users.set_index('user_id', inplace = True)
@@ -53,7 +72,7 @@ def format_standings(users, rosters):
 
     standings = rosters.join(users)
 
-    standings = standings[['display_name', 'team_name', 'points_for', 'points_against', 'wins', 'ties', 'losses']]
+    standings = standings[['team_name', 'display_name', 'points_for', 'points_against', 'wins', 'ties', 'losses']]
     standings['record'] = [f'{wins}-{losses}' if ties == 0 else f'{wins}-{ties}-{losses}' for wins, ties, losses in zip(standings['wins'], standings['ties'], standings['losses'])]
 
     standings.sort_values(['wins', 'points_for'], ascending = False, inplace = True)
@@ -107,8 +126,12 @@ def format_strength(standings):
 
 users = get_users()
 rosters = get_rosters()
+matchups = get_matchups()
 standings = format_standings(users, rosters)
 strength = format_strength(standings)
+
+king_of_week = 'jpre195'
+clown_of_week = 'tmyers44'
 
 st.title('Copper Kings Dynasty League')
 
@@ -118,22 +141,12 @@ with st.container():
 
     col1, col2 = tab1.columns(2)
 
-    col1.metric(':crown: King of the Week', 'jpre195')
-    col2.metric(':clown_face: Clown of the Week', 'tmyers44')
+    col1.metric(':crown: King of the Week', f'{king_of_week}: 120', help = 'Team who scored the most points this week')
+    col2.metric(':clown_face: Clown of the Week', f'{clown_of_week}: 89', help = 'Team who scored the least this week')
 
     tab1.dataframe(standings, hide_index = True, use_container_width = True)
 
 with st.container():
-
-    # plt.style.use('dark_background')
-
-    # fig, ax = plt.subplots()
-
-    # ax.scatter(standings['Points For'], standings['Points Against'])
-    # ax.axhline(0, color = 'white', linewidth = 1)
-    # ax.axvline(0, color = 'white', linewidth = 1)
-
-    # tab2.pyplot(fig)
     
     domain_ = ['Juggernaut', 'Lucky', 'Unlucky', 'Trash']
     range_ = ['blue', 'green', 'yellow', 'brown']
