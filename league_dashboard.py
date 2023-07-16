@@ -7,7 +7,8 @@ import matplotlib.cbook as cbook
 import altair as alt
 
 #Constants
-LEAGUE_ID = 981358650981781504
+# LEAGUE_ID = 981358650981781504
+LEAGUE_ID = 871181145969176576 #Use this leage ID until our league starts
 API_URL = 'https://api.sleeper.app/v1'
 
 @st.cache_data
@@ -47,15 +48,15 @@ def get_rosters() -> pd.DataFrame:
     results = pd.DataFrame(rosters)
 
     #Drop unnecessary columns
-    results.drop(['taxi', 'settings', 'starters', 'reserve', 'players', 'player_map', 'metadata', 'league_id', 'keepers', 'co_owners'], axis = 1, inplace = True)
+    results.drop(['taxi', 'settings', 'player_map', 'metadata', 'league_id', 'keepers', 'co_owners'], axis = 1, inplace = True)
 
     #Uncomment these when league starts
-    # results['points_for'] = [float(str(record['settings']['fpts']) + str(record['settings']['fpts_decimal'])) for record in rosters]
-    # results['points_against'] = [float(str(record['settings']['fpts_against']) + str(record['settings']['fpts_against_decimal'])) for record in rosters]
+    results['points_for'] = [float(str(record['settings']['fpts']) + '.' + str(record['settings']['fpts_decimal'])) for record in rosters]
+    results['points_against'] = [float(str(record['settings']['fpts_against']) + '.' + str(record['settings']['fpts_against_decimal'])) for record in rosters]
 
     #Extract points for/against, wins, ties, and losses
-    results['points_for'] = [record['settings']['fpts'] for record in rosters]
-    results['points_against'] = [0 for _ in rosters]
+    # results['points_for'] = [record['settings']['fpts'] for record in rosters]
+    # results['points_against'] = [0 for _ in rosters]
     results['wins'] = [record['settings']['wins'] for record in rosters]
     results['ties'] = [record['settings']['ties'] for record in rosters]
     results['losses'] = [record['settings']['losses'] for record in rosters]
@@ -73,6 +74,9 @@ def get_matchups() -> pd.DataFrame:
     #Initialize week variable
     week = 1
 
+    #Initialize results
+    matchups = pd.DataFrame()
+
     while True:
 
         #API query
@@ -80,16 +84,21 @@ def get_matchups() -> pd.DataFrame:
         results = response.json()
 
         #Haven't reached current week
-        if len(results) == 0:
+        if len(results) == 0 or week > 15:
 
             break
+
+        results_df = pd.DataFrame(results)
+        results_df['week'] = week
+        
+        results_df = results_df[['roster_id', 'points', 'matchup_id', 'week']]
+
+        matchups = pd.concat([matchups, results_df])
 
         #Increment week
         week += 1
 
-    #TODO: Extract data once first week has finished
-
-    return results
+    return matchups
 
 def format_standings(users: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame:
     """Format dataframe to display standings
@@ -102,12 +111,15 @@ def format_standings(users: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame
     :rtype: pd.DataFrame
     """
 
+    users_copy = users.copy()
+    rosters_copy = rosters.copy()
+
     #Set indeces for joining
-    users.set_index('user_id', inplace = True)
-    rosters.set_index('owner_id', inplace = True)
+    users_copy.set_index('user_id', inplace = True)
+    rosters_copy.set_index('owner_id', inplace = True)
 
     #Join to create standings
-    standings = rosters.join(users)
+    standings = rosters_copy.join(users_copy)
 
     #Reformat record into one column
     standings['record'] = [f'{wins}-{losses}' if ties == 0 else f'{wins}-{ties}-{losses}' for wins, ties, losses in zip(standings['wins'], standings['ties'], standings['losses'])]
@@ -119,7 +131,7 @@ def format_standings(users: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame
     standings['Rank'] = [i for i in range(1, standings.shape[0] + 1)]
 
     #Drop wins, ties, and losses columns
-    standings.drop(['wins', 'ties', 'losses'], inplace = True, axis = 1)
+    standings.drop(['wins', 'ties', 'losses', 'starters', 'reserve', 'players'], inplace = True, axis = 1)
 
     #Rename columns
     standings.rename({'display_name' : 'Owner',
@@ -204,10 +216,51 @@ def format_winners_losers(standings: pd.DataFrame):
 
     return winners, losers
 
+def format_roster(users: pd.DataFrame, rosters: pd.DataFrame, selected_team: str) -> pd.DataFrame:
+    """Format data for roster view
+
+    :param users: Owner information
+    :type users: pd.DataFrame
+    :param rosters: Roster information
+    :type rosters: pd.DataFrame
+    :param selected_team: Selected team from select box
+    :type selected_team: str
+    :return: Team roster
+    :rtype: pd.DataFrame
+    """
+
+    #Get owner ID
+    owner_id = users[users.display_name == selected_team]['user_id'].values[0]
+
+    #Get team roster
+    team_roster = rosters[rosters.owner_id == owner_id].reset_index(drop = True)
+
+    #Explode players column
+    team_roster = team_roster.explode('players', ignore_index = True)
+
+    #Set players to index
+    team_roster.set_index('players', inplace = True)
+
+    #Make copy of player IDs dataframe
+    player_ids_copy = player_ids.copy()
+
+    #Set player_id to index
+    player_ids_copy.set_index('player_id')
+
+    #Join roster info to player IDs
+    team_roster = team_roster.join(player_ids_copy)
+
+    #Extract player names    
+    team_roster = team_roster['player']
+
+    return team_roster
+
 #Pull data
 users = get_users()
 rosters = get_rosters()
 matchups = get_matchups()
+player_ids = pd.read_csv('./data/player_ids.csv')
+current_week = matchups[matchups.week == max(matchups.week)].reset_index(drop = True)
 
 #Format data
 standings = format_standings(users, rosters)
@@ -215,22 +268,46 @@ strength = format_strength(standings)
 winners_bracket, losers_bracket = format_winners_losers(standings)
 
 #Calculate data
-king_of_week = 'jpre195'
-clown_of_week = 'tmyers44'
+king_of_week_id = ''
+clown_of_week_id = ''
+max_score = -1
+min_score = 9999
+
+#Find king/clown of the week
+for score, roster in zip(current_week['points'], current_week['roster_id']):
+
+    if score > max_score:
+
+        king_of_week_id = roster
+        max_score = score
+    
+    if score < min_score:
+
+        clown_of_week_id = roster
+        min_score = score
+
+king_of_week_owner = rosters[rosters.roster_id == king_of_week_id]['owner_id'].values[0]
+clown_of_week_owner = rosters[rosters.roster_id == clown_of_week_id]['owner_id'].values[0]
+
+king_of_week = users[users.user_id == king_of_week_owner]['display_name'].values[0]
+clown_of_week = users[users.user_id == clown_of_week_owner]['display_name'].values[0]
 
 #App title
 st.title('Copper Kings Dynasty League')
 
 #App tabs
+# tab1, tab2, tab3 = st.tabs([':medal: Standings', ':muscle: Team Strength', ':football: Rosters'])
 tab1, tab2 = st.tabs([':medal: Standings', ':muscle: Team Strength'])
+
+### Tab 1 -------------------------------
 
 #King/Clown of the week cards
 with st.container():
 
     col1, col2 = tab1.columns(2)
 
-    col1.metric(':crown: King of the Week', f'{king_of_week}: 120', help = 'Team who scored the most points this week')
-    col2.metric(':clown_face: Clown of the Week', f'{clown_of_week}: 89', help = 'Team who scored the least this week')
+    col1.metric(':crown: King of the Week', f'{king_of_week}: {max_score}', help = 'Team who scored the most points this week')
+    col2.metric(':clown_face: Clown of the Week', f'{clown_of_week}: {min_score}', help = 'Team who scored the least this week')
 
 tab1.divider()
 
@@ -252,6 +329,8 @@ with st.container():
     col2.header(":shit: Loser's Bracket")
     col2.dataframe(losers_bracket, hide_index = True, use_container_width = True)
 
+### Tab 2 -------------------------------
+
 #Team strength view
 with st.container():
     
@@ -261,10 +340,26 @@ with st.container():
     chart = (alt.Chart(strength)
                 .mark_circle(size = 250)
                 .encode(x = 'Points Differential',
-                        y = 'Points For',
+                        y = alt.Y('Points For', scale = alt.Scale(zero = False)),
                         color = alt.Color('Group').scale(domain = domain_, range = range_).title(None),
                         tooltip = ['Points For', 'Points Against', 'Points Differential', 'Owner', 'Team'])
                 .interactive()
     )
 
     tab2.altair_chart(chart, use_container_width = True)
+
+### Tab 3 -------------------------------
+
+# with st.container():
+
+#     #Get a list of all owners
+#     teams = list(users['display_name'].unique())
+
+#     #Select box of owners
+#     selected_team = tab3.selectbox('Owner', teams)
+
+#     #Get players on selected team
+#     team_roster = format_roster(users, rosters, selected_team)
+
+#     #Present dataframe of roster
+#     tab3.dataframe(team_roster, hide_index = True, use_container_width = True)
