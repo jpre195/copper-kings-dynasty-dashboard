@@ -1,6 +1,6 @@
 # Copper Kings Dynasty Dashboard
 
-Codebase for league's streamlit app.
+Codebase for league's streamlit app. App is hosted on Streamlit Cloud and can be found [here](https://copper-kings-dynasty.streamlit.app/).
 
 ------------------
 ## Creating a tag
