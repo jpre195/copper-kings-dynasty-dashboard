@@ -8,7 +8,7 @@ import altair as alt
 
 #Constants
 # LEAGUE_ID = 981358650981781504
-LEAGUE_ID = 871181145969176576 #Use this leage ID until our league starts
+LEAGUE_ID = 871181145969176576 #Use this league ID until our league starts
 API_URL = 'https://api.sleeper.app/v1'
 
 @st.cache_data
@@ -100,19 +100,85 @@ def get_matchups() -> pd.DataFrame:
 
     return matchups
 
-def format_standings(users: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame:
+def calculate_power_rankings(matchups: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame:
+    """Calculate power rankings
+
+    :param matchups: Matchup information
+    :type matchups: pd.DataFrame
+    :param rosters: Roster information
+    :type rosters: pd.DataFrame
+    :return: Power rankings
+    :rtype: pd.DataFrame
+    """
+
+    #Make copy of roster dataframe
+    rosters_copy = rosters.copy()
+
+    #Calculate win percentage
+    rosters_copy['games'] = rosters_copy['wins'] + rosters_copy['ties'] + rosters_copy['losses']
+    rosters_copy['win_percent'] = rosters_copy['wins'] / rosters_copy['games']
+
+    #Filter out unecessary columns
+    rosters_copy = rosters_copy[['roster_id', 'win_percent']]
+
+    #Initialize final dataframe
+    results = pd.DataFrame()
+
+    for roster in rosters.roster_id.unique():
+
+        #Extract current rosters matchups
+        curr_matchups = matchups[matchups.roster_id == roster].reset_index(drop = True)
+
+        #Initialize dataframe with opponent scores
+        opponents = matchups[['roster_id', 'points', 'week']]
+
+        #Join win percentage information to opponent scores
+        opponents = opponents.merge(rosters_copy, on = 'roster_id', how = 'left')
+
+        #Rename columns
+        opponents.rename({'roster_id' : 'matchup_id',
+                          'points' : 'opponent_points'}, axis = 1, inplace = True)
+        
+        #Join current teams matchups with opponents scores
+        curr_matchups = curr_matchups.merge(opponents, on = ['matchup_id', 'week'], how = 'left')
+
+        #Calculate win/loss for each matchup
+        curr_matchups['win'] = [1 if curr_points > curr_opponent_points else 0 for curr_points, curr_opponent_points in zip(curr_matchups['points'], curr_matchups['opponent_points'])]
+
+        #Calculate rank score
+        curr_matchups['rank_score'] = [win * win_percent for win, win_percent in zip(curr_matchups['win'], curr_matchups['win_percent'])]
+
+        #Sum up rank score
+        curr_results = curr_matchups.groupby('roster_id').sum().reset_index()
+
+        #Filter out unecessary columns
+        curr_results = curr_results[['roster_id', 'rank_score']]
+
+        #Join current team's results to full dataframe
+        results = pd.concat([results, curr_results])
+
+    #Reset final dataframe's index
+    results.reset_index(drop = True, inplace = True)
+
+    return results
+
+def format_standings(users: pd.DataFrame, rosters: pd.DataFrame, power_ranks: pd.DataFrame) -> pd.DataFrame:
     """Format dataframe to display standings
 
     :param users: Users in league
     :type users: pd.DataFrame
     :param rosters: Roster information
     :type rosters: pd.DataFrame
+    :param power_ranks: Power rankings
+    :type power_ranks: pd.DataFrame
     :return: Standings
     :rtype: pd.DataFrame
     """
 
+    #Make copies of input dataframes
     users_copy = users.copy()
     rosters_copy = rosters.copy()
+    power_ranks_copy = power_ranks.copy()
 
     #Set indeces for joining
     users_copy.set_index('user_id', inplace = True)
@@ -120,9 +186,16 @@ def format_standings(users: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame
 
     #Join to create standings
     standings = rosters_copy.join(users_copy)
+    standings = standings.merge(power_ranks_copy, on = 'roster_id', how = 'left')
 
     #Reformat record into one column
     standings['record'] = [f'{wins}-{losses}' if ties == 0 else f'{wins}-{ties}-{losses}' for wins, ties, losses in zip(standings['wins'], standings['ties'], standings['losses'])]
+
+    #Sort based on rank score
+    standings.sort_values(['rank_score', 'points_for'], ascending = False, inplace = True)
+
+    #Calculate power ranking
+    standings['Power Rank'] = [i for i in range(1, standings.shape[0] + 1)]
 
     #Sort based on wins and then points for
     standings.sort_values(['wins', 'points_for'], ascending = False, inplace = True)
@@ -143,35 +216,35 @@ def format_standings(users: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame
                       inplace = True)
     
     #Filter out columns
-    standings = standings[['Rank', 'Team', 'Owner', 'Points For', 'Points Against', 'Record']]
+    standings = standings[['Rank', 'Power Rank', 'Team', 'Owner', 'Points For', 'Points Against', 'Record']]
 
     return standings
 
-def get_strength_group(df, avg_for):
+def get_strength_group(df, avg_for, avg_against):
 
     #Current row's points for and point differential
     points_for = df['Points For']
-    points_diff = df['Points Differential']
+    points_against = df['Points Against']
 
     #If they're points are above-average and have lower points against
-    if points_for > avg_for and points_diff > 0:
+    if points_for > avg_for and points_against > avg_against:
+
+        df['Group'] = 'Balanced'
+
+    #If they're points are above-average, but have higher points against
+    elif points_for > avg_for and points_against <= avg_against:
 
         df['Group'] = 'Juggernaut'
 
-    #If they're points are above-average, but have higher points against
-    elif points_for > avg_for and points_diff <= 0:
-
-        df['Group'] = 'Unlucky'
-
     #If they're points are below-average, but have lower points against
-    elif points_for <= avg_for and points_diff > 0:
+    elif points_for <= avg_for and points_against > avg_against:
 
-        df['Group'] = 'Lucky'
+        df['Group'] = 'Trash'
 
     #If they're points are below-average and have higher points against
     else:
 
-        df['Group'] = 'Trash'
+        df['Group'] = 'Balanced'
 
     return df
 
@@ -188,13 +261,14 @@ def format_strength(standings: pd.DataFrame) -> pd.DataFrame:
     strength = standings.copy()
 
     #Calculate points differential
-    strength['Points Differential'] = strength['Points For'] - strength['Points Against']
+    # strength['Points Differential'] = strength['Points For'] - strength['Points Against']
 
     #Average points scored
     avg_points_for = strength['Points For'].mean()
+    avg_points_against = strength['Points Against'].mean()
 
     #Get team strength grouping
-    strength = strength.apply(get_strength_group, axis = 1, avg_for = avg_points_for)
+    strength = strength.apply(get_strength_group, axis = 1, avg_for = avg_points_for, avg_against = avg_points_against)
 
     return strength
 
@@ -263,7 +337,8 @@ player_ids = pd.read_csv('./data/player_ids.csv')
 current_week = matchups[matchups.week == max(matchups.week)].reset_index(drop = True)
 
 #Format data
-standings = format_standings(users, rosters)
+power_ranks = calculate_power_rankings(matchups, rosters)
+standings = format_standings(users, rosters, power_ranks)
 strength = format_strength(standings)
 winners_bracket, losers_bracket = format_winners_losers(standings)
 
@@ -316,6 +391,12 @@ with st.container():
 
     tab1.dataframe(standings, hide_index = True, use_container_width = True)
 
+    tab1.info("""
+    Power rankings are calculated based on the win percentage of teams you have beat in matchups. High ranking teams
+    with low power rank have a _weak_ strength of schedule whereas teams with low rank and high power rank have 
+    a _strong_ strength of schedule.
+    """)
+
 tab1.divider()
 
 #Winner's Loser's Bracket
@@ -334,17 +415,32 @@ with st.container():
 #Team strength view
 with st.container():
     
-    domain_ = ['Juggernaut', 'Lucky', 'Unlucky', 'Trash']
-    range_ = ['blue', 'green', 'yellow', 'brown']
+    domain_ = ['Juggernaut', 'Balanced', 'Trash']
+    range_ = ['blue', 'yellow', 'brown']
 
     chart = (alt.Chart(strength)
                 .mark_circle(size = 250)
-                .encode(x = 'Points Differential',
-                        y = alt.Y('Points For', scale = alt.Scale(zero = False)),
+                .encode(x = alt.X('Points For', scale = alt.Scale(zero = False)),
+                        # x = 'Points For',
+                        y = alt.Y('Points Against', sort = 'descending', scale = alt.Scale(zero = False)),
                         color = alt.Color('Group').scale(domain = domain_, range = range_).title(None),
-                        tooltip = ['Points For', 'Points Against', 'Points Differential', 'Owner', 'Team'])
+                        tooltip = ['Points For', 'Points Against', 'Owner', 'Team', 'Record'])
                 .interactive()
     )
+
+    min_point = min([strength['Points For'].min(), strength['Points Against'].min()])
+    max_point = max([strength['Points For'].max(), strength['Points Against'].max()])
+
+    ref_line_df = pd.DataFrame({'Points For' : [min_point, max_point],
+                                'Points Against' : [min_point, max_point]})
+
+    reference_line = (alt.Chart(ref_line_df)
+                      .mark_line(color = 'white', strokeDash = [5, 2])
+                      .encode(x = alt.X('Points For', scale = alt.Scale(zero = False)),
+                              y = alt.Y('Points Against', sort = 'descending', scale = alt.Scale(zero = False)))
+                    )
+    
+    chart = chart + reference_line
 
     tab2.altair_chart(chart, use_container_width = True)
 
