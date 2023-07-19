@@ -5,6 +5,7 @@ import requests
 import matplotlib.pyplot as plt
 import matplotlib.cbook as cbook
 import altair as alt
+import time
 
 #Constants
 # LEAGUE_ID = 981358650981781504
@@ -130,17 +131,18 @@ def calculate_power_rankings(matchups: pd.DataFrame, rosters: pd.DataFrame) -> p
         curr_matchups = matchups[matchups.roster_id == roster].reset_index(drop = True)
 
         #Initialize dataframe with opponent scores
-        opponents = matchups[['roster_id', 'points', 'week']]
+        opponents = matchups[['roster_id', 'matchup_id', 'points', 'week']]
 
         #Join win percentage information to opponent scores
         opponents = opponents.merge(rosters_copy, on = 'roster_id', how = 'left')
 
         #Rename columns
-        opponents.rename({'roster_id' : 'matchup_id',
+        opponents.rename({'roster_id' : 'opponent_id',
                           'points' : 'opponent_points'}, axis = 1, inplace = True)
         
         #Join current teams matchups with opponents scores
         curr_matchups = curr_matchups.merge(opponents, on = ['matchup_id', 'week'], how = 'left')
+        curr_matchups = curr_matchups[curr_matchups.roster_id != curr_matchups.opponent_id].reset_index(drop = True)
 
         #Calculate win/loss for each matchup
         curr_matchups['win'] = [1 if curr_points > curr_opponent_points else 0 for curr_points, curr_opponent_points in zip(curr_matchups['points'], curr_matchups['opponent_points'])]
@@ -329,6 +331,145 @@ def format_roster(users: pd.DataFrame, rosters: pd.DataFrame, selected_team: str
 
     return team_roster
 
+def apply_cumulative_rank(df, box_scores):
+
+    #Get roster ID and week
+    roster_id = df['roster_id']
+    week = df['week']
+
+    #Filter down full dataframe to everything through current week
+    wins_df = box_scores[box_scores.week <= week].reset_index(drop = True)
+    wins_df = wins_df[wins_df.roster_id == roster_id].reset_index(drop = True)
+
+    #Calculate win for each week
+    wins_df['win'] = [1 if curr_points > curr_opponent else 0 for curr_points, curr_opponent in zip(wins_df['points'], wins_df['opponent_points'])]
+
+    #Calculate number of wins and cumulative points
+    wins = wins_df['win'].sum()
+    cum_points = wins_df['points'].sum()
+
+    df['cumulative_wins'] = wins
+    df['cumulative_points'] = cum_points
+
+    return df
+
+def format_rank_race(matchups: pd.DataFrame, users: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame:
+    """Format data to build rank race charts
+
+    :param matchups: Matchup information
+    :type matchups: pd.DataFrame
+    :param users: Team owner information
+    :type users: pd.DataFrame
+    :param rosters: Roster information
+    :type rosters: pd.DataFrame
+    :return: Rank results over time
+    :rtype: pd.DataFrame
+    """
+
+    #Create copies of input dataframes
+    matchups_copy = matchups.copy()
+    opponents = matchups.copy()
+
+    #Rename columns for joining
+    opponents.rename({'roster_id' : 'opponent_id',
+                      'points' : 'opponent_points'}, axis = 1, inplace = True)
+    
+    #Merge opponents with matchups
+    box_scores = matchups_copy.merge(opponents, on = ['matchup_id', 'week'])
+    box_scores = box_scores[box_scores.roster_id != box_scores.opponent_id].reset_index(drop = True)
+
+    #Get rank and cumulative points per week
+    box_scores = box_scores.apply(apply_cumulative_rank, axis = 1, box_scores = box_scores)
+
+    #Initialize results dataframe
+    results = pd.DataFrame()
+
+    #For each week
+    for week in box_scores['week'].unique():
+
+        #Get current weeks scores
+        curr_week = box_scores[box_scores['week'] == week].reset_index(drop = True)
+
+        #Sort by wins and points
+        curr_week = curr_week.sort_values(['cumulative_wins', 'cumulative_points'], ascending = False)
+
+        #Assign weekly rank
+        curr_week['rank'] = [i for i in range(1, curr_week.shape[0] + 1)]
+
+        #Append to results
+        results = pd.concat([results, curr_week])
+
+    #Reset index
+    results.reset_index(drop = True, inplace = True)
+
+    #Copy rosters dataframe
+    rosters_copy = rosters.copy()
+    rosters_copy.rename({'owner_id' : 'user_id'}, axis = 1, inplace = True)
+
+    #Get team name information
+    team_names = users.merge(rosters_copy, on = 'user_id')
+
+    #Join results with team name information
+    results = results.merge(team_names, on = 'roster_id', how = 'left')
+    results = results[['display_name', 'week', 'cumulative_wins', 'cumulative_points', 'rank']]
+
+    #Rename columns
+    results.rename({'display_name' : 'Owner',
+                    'week' : 'Week',
+                    'cumulative_wins' : 'Wins',
+                    'cumulative_points' : 'Points',
+                    'rank' : 'Rank'}, axis = 1, inplace = True)
+
+    return results
+
+def build_rank_race_chart(df: pd.DataFrame) -> alt.Chart:
+    """Build rank race chart
+
+    :param df: Dataframe to build chart with
+    :type df: pd.DataFrame
+    :return: Chart
+    :rtype: alt.Chart
+    """
+
+    #Build chart
+    base_chart = (alt.Chart(df)
+                  .mark_line()
+                  .encode(x = 'Week:O',
+                          y = alt.Y('Rank', scale = alt.Scale(reverse = True, zero = False)),
+                          color = 'Owner:N')
+                    )
+    
+    #Set height
+    base_chart = base_chart.properties(height = 400)
+    
+    return base_chart
+
+def build_points_race_chart(df: pd.DataFrame) -> alt.Chart:
+    """Build points race bar chart
+
+    :param df: Dataframe to build chart with
+    :type df: pd.DataFrame
+    :return: Chart
+    :rtype: alt.Chart
+    """
+
+    #Sort dataframe by points
+    df = df.sort_values('Points', ascending = False)
+
+    #Build chart
+    base_chart = (alt.Chart(df)
+                  .mark_bar()
+                  .encode(y = alt.Y('Owner:N', sort = '-x'),
+                          x = 'Points:Q',
+                          color = 'Owner:N')
+                    )
+    
+    #Set title and height
+    base_chart = base_chart.properties(title = f'Cumulative Points Scored - Week {int(df.Week.max())}')
+    base_chart = base_chart.properties(height = 400)
+    
+    return base_chart
+
 #Pull data
 users = get_users()
 rosters = get_rosters()
@@ -341,6 +482,7 @@ power_ranks = calculate_power_rankings(matchups, rosters)
 standings = format_standings(users, rosters, power_ranks)
 strength = format_strength(standings)
 winners_bracket, losers_bracket = format_winners_losers(standings)
+rank_race = format_rank_race(matchups, users, rosters)
 
 #Calculate data
 king_of_week_id = ''
@@ -372,7 +514,7 @@ st.title('Copper Kings Dynasty League')
 
 #App tabs
 # tab1, tab2, tab3 = st.tabs([':medal: Standings', ':muscle: Team Strength', ':football: Rosters'])
-tab1, tab2 = st.tabs([':medal: Standings', ':muscle: Team Strength'])
+tab1, tab2, tab3 = st.tabs([':medal: Standings', ':muscle: Team Strength', ':runner: Playoff Race'])
 
 ### Tab 1 -------------------------------
 
@@ -445,6 +587,49 @@ with st.container():
     tab2.altair_chart(chart, use_container_width = True)
 
 ### Tab 3 -------------------------------
+
+with st.container():
+
+    #Create a select box with chart options
+    option = tab3.selectbox('What would you like to view over time?', ('Rank', 'Points'))
+
+    #Build initial charts
+    rank_race_chart = build_rank_race_chart(rank_race[rank_race.Week < 2])
+    points_race_chart = build_points_race_chart(rank_race[rank_race.Week == 1])
+
+    #Add initial chart to app
+    if option == 'Rank':
+
+        rank_plot = tab3.altair_chart(rank_race_chart, use_container_width = True)
+
+    else:
+
+        points_plot = tab3.altair_chart(points_race_chart, use_container_width = True)
+
+    #Create a start button
+    start_btn = tab3.button('Start', type = 'primary')
+
+    #If start button has been pressed
+    if start_btn:
+
+        #For each week
+        for i in range(2, int(rank_race.Week.max()) + 1):
+
+            #If rank view, update with everything up through current week
+            if option == 'Rank':
+
+                curr_rank_race = rank_race[rank_race.Week < i + 1]
+                curr_rank_chart = build_rank_race_chart(curr_rank_race)
+                rank_plot = rank_plot.altair_chart(curr_rank_chart, use_container_width = True)
+
+            #If points view, update with current week
+            else:
+
+                curr_points_race = rank_race[rank_race.Week == i]
+                curr_points_chart = build_points_race_chart(curr_points_race)
+                points_plot = points_plot.altair_chart(curr_points_chart, use_container_width = True)
+
+            time.sleep(1)
 
 # with st.container():
 
