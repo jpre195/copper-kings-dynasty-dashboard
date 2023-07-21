@@ -231,7 +231,7 @@ def get_strength_group(df, avg_for, avg_against):
     #If they're points are above-average and have lower points against
     if points_for > avg_for and points_against > avg_against:
 
-        df['Group'] = 'Balanced'
+        df['Group'] = 'Mediocre'
 
     #If they're points are above-average, but have higher points against
     elif points_for > avg_for and points_against <= avg_against:
@@ -246,7 +246,7 @@ def get_strength_group(df, avg_for, avg_against):
     #If they're points are below-average and have higher points against
     else:
 
-        df['Group'] = 'Balanced'
+        df['Group'] = 'Mediocre'
 
     return df
 
@@ -433,7 +433,8 @@ def build_rank_race_chart(df: pd.DataFrame) -> alt.Chart:
 
     #Build chart
     base_chart = (alt.Chart(df)
-                  .mark_line()
+                  .mark_line(strokeWidth = 6,
+                             interpolate = 'monotone')
                   .encode(x = 'Week:O',
                           y = alt.Y('Rank', scale = alt.Scale(reverse = True, zero = False)),
                           color = 'Owner:N')
@@ -458,11 +459,15 @@ def build_points_race_chart(df: pd.DataFrame) -> alt.Chart:
 
     #Build chart
     base_chart = (alt.Chart(df)
-                  .mark_bar()
+                  .mark_bar(cornerRadius = 5)
                   .encode(y = alt.Y('Owner:N', sort = '-x'),
                           x = 'Points:Q',
-                          color = 'Owner:N')
+                          color = 'Owner:N',
+                          text = 'Points')
                     )
+    
+    #Add text labels
+    base_chart = base_chart + base_chart.mark_text(align = 'left', dx = 2)
     
     #Set title and height
     base_chart = base_chart.properties(title = f'Cumulative Points Scored - Week {int(df.Week.max())}')
@@ -546,7 +551,7 @@ with st.container():
 
     col1, col2 = tab1.columns(2)
 
-    col1.header(":trophy: Playoff Bracket")
+    col1.header(":moneybag: Playoff Bracket")
     col1.dataframe(winners_bracket, hide_index = True, use_container_width = True)
 
     col2.header(":shit: Loser's Bracket")
@@ -557,7 +562,7 @@ with st.container():
 #Team strength view
 with st.container():
     
-    domain_ = ['Juggernaut', 'Balanced', 'Trash']
+    domain_ = ['Juggernaut', 'Mediocre', 'Trash']
     range_ = ['blue', 'yellow', 'brown']
 
     chart = (alt.Chart(strength)
@@ -585,6 +590,10 @@ with st.container():
     chart = chart + reference_line
 
     tab2.altair_chart(chart, use_container_width = True)
+
+    tab2.info("""
+    Teams landing above the mediocrity line are more dominant while teams falling below are __trash__.
+    """)
 
 ### Tab 3 -------------------------------
 
