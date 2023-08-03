@@ -6,6 +6,9 @@ import matplotlib.pyplot as plt
 import matplotlib.cbook as cbook
 import altair as alt
 import time
+from PIL import Image
+from io import BytesIO
+import base64
 
 #Constants
 # LEAGUE_ID = 981358650981781504
@@ -250,9 +253,11 @@ def get_strength_group(df, avg_for, avg_against):
 
     return df
 
-def format_strength(standings: pd.DataFrame) -> pd.DataFrame:
+def format_strength(users: pd.DataFrame, standings: pd.DataFrame) -> pd.DataFrame:
     """Format dataframe for team strength view
 
+    :param users: Users
+    :type users: pd.DataFrame
     :param standings: Current standings
     :type standings: pd.DataFrame
     :return: Strength information
@@ -261,6 +266,7 @@ def format_strength(standings: pd.DataFrame) -> pd.DataFrame:
 
     #Copy of standings
     strength = standings.copy()
+    users_copy = users.copy()
 
     #Calculate points differential
     # strength['Points Differential'] = strength['Points For'] - strength['Points Against']
@@ -271,6 +277,13 @@ def format_strength(standings: pd.DataFrame) -> pd.DataFrame:
 
     #Get team strength grouping
     strength = strength.apply(get_strength_group, axis = 1, avg_for = avg_points_for, avg_against = avg_points_against)
+
+    #Filter users to just have display name and avatar
+    users_copy = users_copy[['display_name', 'avatar']]
+    users_copy.rename({'display_name' : 'Owner'}, axis = 1, inplace = True)
+
+    strength = strength.merge(users_copy, on = 'Owner', how = 'left')
+    strength['avatar'] = [f'https://sleepercdn.com/avatars/thumbs/{avatar}' for avatar in strength['avatar']]
 
     return strength
 
@@ -485,7 +498,7 @@ current_week = matchups[matchups.week == max(matchups.week)].reset_index(drop = 
 #Format data
 power_ranks = calculate_power_rankings(matchups, rosters)
 standings = format_standings(users, rosters, power_ranks)
-strength = format_strength(standings)
+strength = format_strength(users, standings)
 winners_bracket, losers_bracket = format_winners_losers(standings)
 rank_race = format_rank_race(matchups, users, rosters)
 
@@ -566,12 +579,13 @@ with st.container():
     range_ = ['blue', 'yellow', 'brown']
 
     chart = (alt.Chart(strength)
-                .mark_circle(size = 250)
+                .mark_image(width = 25, height = 25)
                 .encode(x = alt.X('Points For', scale = alt.Scale(zero = False)),
                         # x = 'Points For',
                         y = alt.Y('Points Against', sort = 'descending', scale = alt.Scale(zero = False)),
-                        color = alt.Color('Group').scale(domain = domain_, range = range_).title(None),
-                        tooltip = ['Points For', 'Points Against', 'Owner', 'Team', 'Record'])
+                        url = 'avatar',
+                        # color = alt.Color('Group').scale(domain = domain_, range = range_).title(None),
+                        tooltip = ['Points For', 'Points Against', 'Group', 'Owner', 'Team', 'Record'])
                 .interactive()
     )
 
