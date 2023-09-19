@@ -8,8 +8,8 @@ import altair as alt
 import time
 
 #Constants
-# LEAGUE_ID = 981358650981781504
-LEAGUE_ID = 871181145969176576 #Use this league ID until our league starts
+LEAGUE_ID = 981358650981781504
+# LEAGUE_ID = 871181145969176576 #Use this league ID until our league starts
 API_URL = 'https://api.sleeper.app/v1'
 
 @st.cache_data
