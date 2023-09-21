@@ -102,6 +102,8 @@ def get_matchups() -> pd.DataFrame:
         #Increment week
         week += 1
 
+    matchups = matchups[matchups.points > 0].reset_index(drop = True)
+
     return matchups
 
 def calculate_power_rankings(matchups: pd.DataFrame, rosters: pd.DataFrame) -> pd.DataFrame:
